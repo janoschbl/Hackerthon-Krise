@@ -27,7 +27,7 @@ uv run uvicorn client:app --reload --port 8001
 
 Öffne <http://localhost:8001>. Die Seite nimmt nach Klick auf den
 Mikrofon-Button Browser-Audio auf, zeigt Transkript-Updates und den Choice-
-Score live an. Der Client leitet den Audiostream an den Backend-Server auf
+Score sowie die passende Avatar-Animation live an. Der Client leitet den Audiostream an den Backend-Server auf
 Port 8000 weiter; bei jedem finalen Turn ruft dieser JEv mit
 `OPENROUTER_API_KEY` auf. Der Mikrofonzugriff funktioniert auf `localhost`
 oder über HTTPS.

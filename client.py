@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -10,11 +11,14 @@ import websockets
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState
 
 
 app = FastAPI(title="Live-Transkript Client")
-templates = Jinja2Templates(directory="templates")
+ROOT_DIR = Path(__file__).resolve().parent
+app.mount("/assets", StaticFiles(directory=ROOT_DIR / "assets"), name="assets")
+templates = Jinja2Templates(directory=ROOT_DIR / "templates")
 logger = logging.getLogger(__name__)
 DEFAULT_STT_WS_URL = "ws://172.16.1.224:8000/ws/deepgram"
 

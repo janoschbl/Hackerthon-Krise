@@ -17,6 +17,9 @@
   <h2>Choice-Score</h2>
   <p id="score">Noch keine Bewertung</p>
   <svg id="chart" width="250" height="110" role="img" aria-label="Konfidenz pro Choice"></svg>
+  <h2>Animation</h2>
+  <img id="avatar" src="/assets/frames/pose_00.png" width="160" height="128"
+       alt="Animierte Pose für Choice-Score 0" style="display:block; background:#fff;">
   <script>
     const button = document.querySelector('#mic');
     const status = document.querySelector('#status');
@@ -25,8 +28,74 @@
     const chart = document.querySelector('#chart');
     const volume = document.querySelector('#volume');
     const volumeValue = document.querySelector('#volume-value');
+    const avatar = document.querySelector('#avatar');
     let socket, stream, audioContext, processor, source, muteNode, active = false;
     let finalText = '';
+
+    const avatarSequences = new Map();
+    let avatarScore = 0;
+    let avatarTarget = 0;
+
+    function avatarFrame(folder, index) {
+      return `/assets/frames/${folder}/frame_${String(index).padStart(3, '0')}.png`;
+    }
+
+    function loadAvatarSequence(folder, count) {
+      if (!avatarSequences.has(folder)) {
+        const images = Array.from({ length: count }, (_, index) => {
+          const image = new Image();
+          image.src = avatarFrame(folder, index);
+          return image;
+        });
+        avatarSequences.set(folder, Promise.all(images.map(image => image.decode())).then(() => images));
+      }
+      return avatarSequences.get(folder);
+    }
+
+    function setAvatarScore(value) {
+      const next = Number(value);
+      if (Number.isInteger(next) && next >= 0 && next <= 9) avatarTarget = next;
+    }
+
+    const avatarDelay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+
+    async function playAvatarSequence(images, fps, interruptOnScore = false) {
+      for (const image of images) {
+        if (interruptOnScore && avatarTarget !== avatarScore) return;
+        avatar.src = image.src;
+        await avatarDelay(1000 / fps);
+      }
+    }
+
+    async function animateAvatar() {
+      try {
+        while (true) {
+          if (avatarScore !== avatarTarget) {
+            const forward = (avatarTarget - avatarScore + 10) % 10;
+            const backward = (avatarScore - avatarTarget + 10) % 10;
+            const goingForward = forward <= backward;
+            const index = goingForward ? avatarScore : (avatarScore + 9) % 10;
+            const frames = await loadAvatarSequence(`transition_${String(index).padStart(2, '0')}`, 9);
+            await playAvatarSequence(goingForward ? frames : [...frames].reverse(), 15);
+            avatarScore = goingForward ? (avatarScore + 1) % 10 : index;
+            avatar.alt = `Animierte Pose für Choice-Score ${avatarScore}`;
+            continue;
+          }
+          const folder = `idle_${String(avatarScore).padStart(2, '0')}`;
+          await playAvatarSequence(await loadAvatarSequence(folder, 80), 20, true);
+          if (avatarScore === 0 && avatarTarget === 0 && Math.random() < 0.3) {
+            const event = Math.random() < 0.5 ? 'wink' : 'look';
+            const count = event === 'wink' ? 20 : 32;
+            await playAvatarSequence(await loadAvatarSequence(`idle_00_event_${event}`, count), 20, true);
+          }
+        }
+      } catch (error) {
+        avatar.alt = 'Animation konnte nicht geladen werden';
+        console.error('Avatar-Animation:', error);
+      }
+    }
+
+    animateAvatar();
 
     function showScore(result) {
       const choice = result?.score;
@@ -148,7 +217,10 @@
             status.textContent = 'Satz erkannt, Bewertung läuft …';
           } else if (event.event === 'jev_prediction') {
             showScore(event.result);
-            if (Number.isInteger(event.score)) score.textContent = String(event.score);
+            if (Number.isInteger(event.score)) {
+              score.textContent = String(event.score);
+              setAvatarScore(event.score);
+            }
             status.textContent = 'Live';
           } else if (event.event === 'jev_error' || event.event === 'error') {
             status.textContent = `Fehler: ${event.message}`;
