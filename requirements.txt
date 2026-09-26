@@ -1,0 +1,4 @@
+deepgram-sdk
+sounddevice
+numpy
+python-dotenv
