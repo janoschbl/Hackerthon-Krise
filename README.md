@@ -169,3 +169,20 @@ Prüfsumme getestet werden:
 
 Es versucht zuerst `/06/004.mp3` und bei ausbleibendem BUSY-Signal den
 globalen Track 4. Dieser kann eine andere Datei auf der SD-Karte sein.
+
+Ein weiterer Test nutzt den Hardware-UART0 des Pi 5 auf GPIO 14 (TX,
+physischer Pin 8) und GPIO 15 (RX, physischer Pin 10). Dafür muss der
+DFPlayer entsprechend umgesteckt sein, `dtoverlay=uart0-pi5` unter `[pi5]`
+in `/boot/firmware/config.txt` stehen und die serielle Linux-Konsole
+deaktiviert sein. Nach einem Neustart sollten `pinctrl get 14` und
+`pinctrl get 15` TXD0 beziehungsweise RXD0 zeigen. Bei gestopptem Backend:
+
+```bash
+.venv/bin/python -m pip install 'pyserial>=3.5'
+.venv/bin/python tools/test_dfplayer_uart.py
+```
+
+Das Skript fragt Status und Zahl der TF-Dateien ab, spielt `/06/004.mp3`
+und zeigt Rohantworten sowie BUSY an. Bei fehlender Wiedergabe testet es
+zusätzlich kurze 8-Byte-Befehle. Die laufende App verwendet weiterhin
+GPIO 5/22; der UART-Test ändert ihre Pinbelegung nicht.
