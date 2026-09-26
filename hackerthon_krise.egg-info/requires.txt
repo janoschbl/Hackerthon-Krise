@@ -1,3 +1,8 @@
+dotenv>=0.9.9
 fastapi[standard]>=0.141.1
+jinja2>=3.1.6
+numpy>=2.0
 seaborn>=0.13.2
+sounddevice>=0.5
 typesafe-sdk>=0.7.1
+websockets>=13

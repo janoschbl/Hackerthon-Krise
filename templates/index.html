@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Live-Transkription</title>
+</head>
+<body>
+  <h1>Live-Transkription</h1>
+  <button id="mic">Mikrofon starten</button>
+  <p id="status">Bereit</p>
+  <h2>Text</h2>
+  <p id="transcript">Hier erscheint dein Text.</p>
+  <h2>Choice-Score</h2>
+  <p id="score">Noch keine Bewertung</p>
+  <svg id="chart" width="250" height="110" role="img" aria-label="Konfidenz pro Choice"></svg>
+  <script>
+    const button = document.querySelector('#mic');
+    const status = document.querySelector('#status');
+    const transcript = document.querySelector('#transcript');
+    const score = document.querySelector('#score');
+    const chart = document.querySelector('#chart');
+    let socket, stream, audioContext, processor, source, muteNode, active = false;
+    let finalText = '';
+
+    function showScore(result) {
+      const choice = result?.score;
+      if (choice === undefined) {
+        score.textContent = JSON.stringify(result);
+      } else if (typeof choice === 'object') {
+        score.textContent = JSON.stringify(choice);
+      } else {
+        score.textContent = String(choice);
+      }
+      const values = findChoiceScores(choice ?? result);
+      chart.replaceChildren();
+      if (!values?.length) {
+        chart.setAttribute('aria-label', 'Für diesen Turn wurden keine Wahrscheinlichkeiten pro Choice geliefert.');
+        return;
+      }
+      const max = Math.max(...values.map(item => item.value), 1);
+      chart.setAttribute('aria-label', `Konfidenz pro Choice: ${values.map(item => `${item.label}: ${(item.value * 100).toFixed(1)}%`).join(', ')}`);
+      const svgNS = 'http://www.w3.org/2000/svg';
+      const plotHeight = 72;
+      const slotWidth = Math.min(24, 230 / values.length);
+      values.forEach((item, index) => {
+        const x = 10 + index * slotWidth;
+        const height = Math.max(1, Math.min(plotHeight, item.value / max * plotHeight));
+        const rect = document.createElementNS(svgNS, 'rect');
+        rect.setAttribute('x', x);
+        rect.setAttribute('y', plotHeight - height + 4);
+        rect.setAttribute('width', Math.max(2, slotWidth - 4));
+        rect.setAttribute('height', height);
+        rect.setAttribute('fill', '#3978c5');
+        const label = document.createElementNS(svgNS, 'text');
+        label.setAttribute('x', x + (slotWidth - 4) / 2);
+        label.setAttribute('y', 91);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-size', '10');
+        label.textContent = item.label;
+        chart.append(rect, label);
+      });
+    }
+
+    function findChoiceScores(value) {
+      if (!value || typeof value !== 'object') return null;
+      // Common response shapes: score.probabilities, score.confidence, or a map of choices to scores.
+      for (const key of ['probabilities', 'confidence', 'scores', 'choice_scores']) {
+        const scores = value[key];
+        if (scores && typeof scores === 'object') {
+          const entries = Array.isArray(scores)
+            ? scores.map((entry, index) => [entry.choice ?? entry.label ?? index, entry.probability ?? entry.confidence ?? entry.score ?? entry.value])
+            : Object.entries(scores);
+          const parsed = entries.map(([label, raw]) => ({ label: String(label), value: Number(raw) }))
+            .filter(item => Number.isFinite(item.value));
+          if (parsed.length) return parsed;
+        }
+      }
+      const direct = Object.entries(value)
+        .filter(([key, raw]) => /^\d+$/.test(key) && Number.isFinite(Number(raw)))
+        .map(([label, raw]) => ({ label, value: Number(raw) }));
+      if (direct.length) return direct;
+      for (const child of Object.values(value)) {
+        const found = findChoiceScores(child);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    function toPcm16(floatSamples) {
+      const pcm = new Int16Array(floatSamples.length);
+      for (let i = 0; i < floatSamples.length; i++) {
+        const sample = Math.max(-1, Math.min(1, floatSamples[i]));
+        pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      }
+      return pcm.buffer;
+    }
+
+    function downsample(samples, fromRate, toRate) {
+      if (fromRate === toRate) return samples;
+      const ratio = fromRate / toRate;
+      const output = new Float32Array(Math.floor(samples.length / ratio));
+      for (let i = 0; i < output.length; i++) {
+        const start = Math.floor(i * ratio);
+        const end = Math.min(Math.floor((i + 1) * ratio), samples.length);
+        let sum = 0;
+        for (let j = start; j < end; j++) sum += samples[j];
+        output[i] = sum / Math.max(1, end - start);
+      }
+      return output;
+    }
+
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        status.textContent = 'Mikrofonzugriff wird in diesem Browser-Kontext nicht unterstützt.';
+        return;
+      }
+      finalText = '';
+      transcript.textContent = '';
+      button.disabled = true;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        socket = new WebSocket(`${protocol}//${location.host}/ws/deepgram`);
+        socket.binaryType = 'arraybuffer';
+        socket.onmessage = ({ data }) => {
+          if (typeof data !== 'string') return;
+          const event = JSON.parse(data);
+          if (event.event === 'transcript' && event.transcript) {
+            transcript.textContent = event.transcript;
+          } else if (event.event === 'end_of_turn' && event.transcript) {
+            // Jeder erkannte Turn ist ein neuer Ansatz und ersetzt den vorherigen.
+            finalText = event.transcript.trim();
+            transcript.textContent = finalText;
+            status.textContent = 'Satz erkannt, Bewertung läuft …';
+          } else if (event.event === 'jev_prediction') {
+            showScore(event.result);
+            status.textContent = 'Live';
+          } else if (event.event === 'jev_error' || event.event === 'error') {
+            status.textContent = `Fehler: ${event.message}`;
+          }
+        };
+        socket.onclose = (event) => {
+          if (active) status.textContent = `Verbindung beendet (${event.reason || event.code})`;
+          stopAudio();
+        };
+        socket.onerror = () => { status.textContent = 'WebSocket-Verbindung fehlgeschlagen.'; };
+        socket.onopen = () => {
+          audioContext = new AudioContext();
+          source = audioContext.createMediaStreamSource(stream);
+          processor = audioContext.createScriptProcessor(4096, 1, 1);
+          processor.onaudioprocess = (event) => {
+            if (socket?.readyState !== WebSocket.OPEN) return;
+            const samples = downsample(event.inputBuffer.getChannelData(0), audioContext.sampleRate, 16000);
+            socket.send(toPcm16(samples));
+          };
+          source.connect(processor);
+          muteNode = audioContext.createGain();
+          muteNode.gain.value = 0;
+          processor.connect(muteNode);
+          muteNode.connect(audioContext.destination);
+          active = true;
+          button.disabled = false;
+          button.textContent = 'Mikrofon stoppen';
+          status.textContent = 'Live – sprich jetzt.';
+        };
+      } catch (error) {
+        status.textContent = `Konnte Mikrofon/Verbindung nicht starten: ${error.message}`;
+        stopAudio();
+        button.disabled = false;
+      }
+    }
+
+    function stopAudio() {
+      active = false;
+      processor?.disconnect();
+      muteNode?.disconnect();
+      source?.disconnect();
+      stream?.getTracks().forEach(track => track.stop());
+      audioContext?.close();
+      processor = source = stream = audioContext = muteNode = null;
+      button.textContent = 'Mikrofon starten';
+      button.disabled = false;
+    }
+
+    function stop() {
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ event: 'stop' }));
+        socket.close();
+      }
+      stopAudio();
+      finalText = '';
+      transcript.textContent = '';
+      status.textContent = 'Aufnahme beendet';
+    }
+
+    button.addEventListener('click', () => active ? stop() : start());
+  </script>
+</body>
+</html>

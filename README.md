@@ -1,5 +1,48 @@
 # Hackerthon-Krise
 
+## Live-Transkription mit Deepgram
+
+`app.py` bietet `/ws/deepgram` als direkten WebSocket-Stream zu Deepgram Flux.
+Der Client sendet rohe PCM-Audiodaten als Binärframes: 16 kHz, mono, signed
+16-bit little-endian (`linear16`). Deepgram liefert laufende `Update`-Texte
+und bei erkannter Sprechpause einen finalen `EndOfTurn`. Die Serverantwort
+enthält dabei `event: "transcript"` oder `event: "end_of_turn"` sowie das
+Originalfeld `deepgram_event` und die übrigen Deepgram-Daten.
+
+Trage `DEEPGRAM_API_KEY` und `OPENROUTER_API_KEY` in `.env` ein und installiere
+die Abhängigkeiten mit `uv sync`. Starte den Server:
+
+```bash
+uv run uvicorn app:app --reload
+```
+
+Für die Website starte zusätzlich den separaten Client-Webserver in einem
+zweiten Terminal:
+
+```bash
+uv run uvicorn client:app --reload --port 8001
+```
+
+Öffne <http://localhost:8001>. Die Seite nimmt nach Klick auf den
+Mikrofon-Button Browser-Audio auf, zeigt Transkript-Updates und den Choice-
+Score live an. Der Client leitet den Audiostream an den Backend-Server auf
+Port 8000 weiter; bei jedem finalen Turn ruft dieser JEv mit
+`OPENROUTER_API_KEY` auf. Der Mikrofonzugriff funktioniert auf `localhost`
+oder über HTTPS.
+
+Alternativ kannst du den Laptop-Mikrofon-Client im Terminal starten. Er streamt
+16-kHz-Mono-PCM über WebSocket und zeigt Live-Transkripte:
+
+```bash
+uv run python client.py
+```
+
+Mit `STT_WS_URL` lässt sich die Serveradresse ändern; Standard ist
+`ws://localhost:8000/ws/deepgram`. Beenden mit Ctrl+C. `pause` und `resume`
+stehen als WebSocket-Steuerereignisse bereit; `stop` finalisiert den aktuellen
+Turn und schließt den Deepgram-Stream. Die generische Anbieter-Proxy-Route
+`/ws/stt` bleibt ebenfalls verfügbar.
+
 ## STT-WebSocket
 
 `app.py` stellt `/ws/stt` als WebSocket-Proxy bereit. Vor dem Start müssen
