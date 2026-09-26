@@ -8,22 +8,29 @@ import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from picodfplayer import DFPlayer  # noqa: E402
+from dfplayer_audio import DFPlayer  # noqa: E402
 
 def main():
     player = None
     try:
-        player = DFPlayer(0, 5, 22, 26)
-        time.sleep(1)
+        player = DFPlayer(0, 14, 15, 26)
+        player.setPlaybackSource(2)
+        time.sleep(0.5)
         player.setVolume(30)
-        print("Spiele /06/004.mp3 über GPIO 5 (TX), 22 (RX), 26 (BUSY) …", flush=True)
+        time.sleep(0.5)
+        print("Spiele /06/004.mp3 über GPIO 14 (TX), 15 (RX), 26 (BUSY) …", flush=True)
+        started = time.monotonic()
         player.playTrack(6, 4)
         busy_seen = False
         for _ in range(200):
-            busy_seen |= player.queryBusy()
+            if player.queryBusy():
+                busy_seen = True
+                break
             time.sleep(0.025)
         print("BUSY wurde LOW: Wiedergabe gestartet." if busy_seen
               else "BUSY blieb HIGH: Wiedergabe nicht bestätigt.")
+        if busy_seen:
+            print(f"Zeit ab Play-Befehl: {time.monotonic() - started:.3f} s")
     finally:
         if player is not None:
             player.close()

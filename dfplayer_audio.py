@@ -1,10 +1,4 @@
-"""Linux Raspberry Pi adapter for the PicoDFPlayer command protocol.
-
-PicoDFPlayer uses MicroPython's machine.UART, which is unavailable on a Pi 5
-running Linux. GPIO 5/6 are not a TX/RX hardware UART pair on that board, so
-lgpio sends the same DFPlayer packets as a timed 9600-baud wave on GPIO 5.
-Feedback is disabled; GPIO 22 is reserved as an RX input and GPIO 26 reads BUSY.
-"""
+"""DFPlayer audio on Raspberry Pi 5 UART0 (GPIO14 TX, GPIO15 RX)."""
 
 import logging
 import queue
@@ -42,44 +36,41 @@ def select_track(score: int, volume: float | None) -> int | None:
 
 
 def command_packet(command: int, parameter1: int, parameter2: int) -> bytes:
-    """DFPlayer 10-byte command, as in PicoDFPlayer but without an ACK."""
+    """DFPlayer 10-byte command with checksum and feedback request."""
     if any(not 0 <= value <= 255 for value in (command, parameter1, parameter2)):
         raise ValueError("DFPlayer-Parameter außerhalb 0..255")
-    payload = (0xFF, 0x06, command, 0x00, parameter1, parameter2)
+    payload = (0xFF, 0x06, command, 0x01, parameter1, parameter2)
     checksum = (-sum(payload)) & 0xFFFF
     return bytes((0x7E, *payload, checksum >> 8, checksum & 0xFF, 0xEF))
 
 
 class DFPlayer:
-    """The user's DFPlayer(0, 5, 22, 26) pinout on Raspberry Pi 5 Linux."""
+    """UART0 to DFPlayer and GPIO26 for its active-low BUSY signal."""
 
-    def __init__(self, uart_instance=0, tx_pin=5, rx_pin=22, busy_pin=26):
-        if uart_instance != 0:
-            raise ValueError("Nur DFPlayer-UART 0 ist konfiguriert")
+    def __init__(self, uart_instance=0, tx_pin=14, rx_pin=15, busy_pin=26):
+        if (uart_instance, tx_pin, rx_pin) != (0, 14, 15):
+            raise ValueError("Pi-5-UART0 nutzt GPIO14 (TX) und GPIO15 (RX)")
         import lgpio
+        import serial
 
         self.gpio = lgpio
-        self.handle = lgpio.gpiochip_open(0)
+        self.port = serial.Serial("/dev/ttyAMA0", 9600, timeout=0, write_timeout=1)
+        self.handle = None
         self.tx_pin, self.rx_pin, self.busy_pin = tx_pin, rx_pin, busy_pin
         try:
-            lgpio.group_claim_output(self.handle, [tx_pin], [1])
-            lgpio.gpio_claim_input(self.handle, rx_pin)
+            self.handle = lgpio.gpiochip_open(0)
             lgpio.gpio_claim_input(self.handle, busy_pin, lgpio.SET_PULL_UP)
         except Exception:
-            lgpio.gpiochip_close(self.handle)
+            self.close()
             raise
 
-    def sendcmd(self, command: int, parameter1: int, parameter2: int, latency: float = 0.5):
+    def sendcmd(self, command: int, parameter1: int, parameter2: int):
         packet = command_packet(command, parameter1, parameter2)
-        # 8N1, LSB first. Each bit lasts about 104 us (9600 baud).
-        pulses = []
-        for byte in packet:
-            for bit in (0, *(byte >> offset & 1 for offset in range(8)), 1):
-                pulses.append(self.gpio.pulse(bit, 1, 104))
-        self.gpio.tx_wave(self.handle, self.tx_pin, pulses)
-        while self.gpio.tx_busy(self.handle, self.tx_pin, self.gpio.TX_WAVE):
-            time.sleep(0.001)
-        time.sleep(latency)
+        self.port.write(packet)
+        self.port.flush()
+
+    def setPlaybackSource(self, source: int):
+        self.sendcmd(0x09, 0, source)
 
     def setVolume(self, volume: int):
         if not 0 <= volume <= 30:
@@ -89,13 +80,16 @@ class DFPlayer:
     def playTrack(self, folder: int, track: int):
         if not 1 <= folder <= 99 or not 1 <= track <= 255:
             raise ValueError("Ungültiger DFPlayer-Ordner oder Track")
-        self.sendcmd(0x0F, folder, track, latency=0.05)
+        self.sendcmd(0x0F, folder, track)
 
     def queryBusy(self) -> bool:
         return self.gpio.gpio_read(self.handle, self.busy_pin) == 0
 
     def close(self):
-        self.gpio.gpiochip_close(self.handle)
+        self.port.close()
+        if self.handle is not None:
+            self.gpio.gpiochip_close(self.handle)
+            self.handle = None
 
 
 class AudioPlayer:
@@ -140,10 +134,13 @@ class AudioPlayer:
     def _run(self):
         player = None
         try:
-            player = DFPlayer(0, 5, 22, 26)
-            if self._stop.wait(1):
+            player = DFPlayer(0, 14, 15, 26)
+            player.setPlaybackSource(2)
+            if self._stop.wait(0.5):
                 return
             player.setVolume(30)
+            if self._stop.wait(0.5):
+                return
             while not self._stop.is_set():
                 try:
                     created, track = self._events.get(timeout=0.2)
@@ -155,7 +152,7 @@ class AudioPlayer:
                         self.last_track = track
                         self.last_played_at = time.time()
                         self.last_busy_seen = False
-                        deadline = time.monotonic() + 1
+                        deadline = time.monotonic() + 1.5
                         while time.monotonic() < deadline and not self._stop.is_set():
                             if player.queryBusy():
                                 self.last_busy_seen = True

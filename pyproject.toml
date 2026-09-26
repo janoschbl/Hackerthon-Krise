@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-display = ["luma.lcd>=2.11", "Pillow>=10", "rpi-lgpio>=0.6", "spidev>=3.6"]
+display = ["luma.lcd>=2.11", "Pillow>=10", "rpi-lgpio>=0.6", "spidev>=3.6", "pyserial>=3.5"]
 uart-test = [
     "pyserial>=3.5",
 ]

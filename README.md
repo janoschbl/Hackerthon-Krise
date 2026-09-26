@@ -117,13 +117,13 @@ JEv-Choice-Score von 0 bis 9 wechselt das Display mit den passenden
 Ordner `06` der DFPlayer-SD-Karte. Scores 2–9 verwenden die zugeordneten
 Zufalls-Tracks; bei 0–1 steuert die gemessene Mikrofonlautstärke Track 03
 oder 04. Solange BUSY aktiv ist, wartet der Player höchstens drei Sekunden.
-Die Belegung ist GPIO 5 (TX zum DFPlayer-RX), GPIO 22 (reservierter RX-Eingang)
-und GPIO 26 (BUSY). Der Pi 5 nutzt dafür ein softwaregetaktetes 9600-Baud-
-Signal, weil GPIO 5/22 dort kein Hardware-UART-Paar bilden. Die
-[PicoDFPlayer-Bibliothek](https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py)
-ist für Linux-GPIO in `picodfplayer.py` angepasst (MIT-Lizenz in
-`PICODFPLAYER_LICENSE`). Das Testskript verwendet diese Version;
-`app.py` verwendet vorerst weiterhin `dfplayer_audio.py`.
+Die Belegung ist GPIO 14 (Pi-TX zum DFPlayer-RX), GPIO 15 (Pi-RX vom
+DFPlayer-TX) und GPIO 26 (BUSY). Der Pi 5 sendet über den Hardware-UART0
+`/dev/ttyAMA0`. `dfplayer_audio.py` wählt die TF-Karte und setzt die
+Lautstärke einmal beim Start; ein neuer Score sendet den Play-Befehl sofort.
+Die ältere softwaregetaktete Variante auf GPIO 5/22 bleibt in
+`picodfplayer.py` zum Vergleich erhalten (MIT-Lizenz in
+`PICODFPLAYER_LICENSE`).
 Die MP3-Dateien müssen auf der DFPlayer-SD-Karte in `06/` liegen, etwa
 `001.mp3` bis `011.mp3`.
 
@@ -155,13 +155,14 @@ systemctl --user stop krise-backend.service
 systemctl --user start krise-backend.service
 ```
 
-Das Skript spielt fest `/06/004.mp3` und meldet, ob der BUSY-Pin während
+Das Skript spielt fest `/06/004.mp3` über UART0 und meldet, ob der BUSY-Pin während
 des Abspielbefehls auf LOW wechselt. Der Backend-Dienst wird davor manuell
 gestoppt und danach wieder gestartet, da nur ein Prozess die GPIO-Pins
 belegen kann.
 
-Zum Vergleich kann bei gestopptem Dienst das kurze DFPlayer-Protokoll ohne
-Prüfsumme getestet werden:
+Der ältere GPIO-5-Test des kurzen DFPlayer-Protokolls ohne Prüfsumme kann bei
+gestopptem Dienst separat ausgeführt werden; dazu muss die Verdrahtung wieder
+auf GPIO 5 umgesteckt sein:
 
 ```bash
 .venv/bin/python tools/test_dfplayer_simple.py
@@ -182,7 +183,7 @@ deaktiviert sein. Nach einem Neustart sollten `pinctrl get 14` und
 .venv/bin/python tools/test_dfplayer_uart.py
 ```
 
-Das Skript fragt Status und Zahl der TF-Dateien ab, spielt `/06/004.mp3`
-und zeigt Rohantworten sowie BUSY an. Bei fehlender Wiedergabe testet es
-zusätzlich kurze 8-Byte-Befehle. Die laufende App verwendet weiterhin
-GPIO 5/22; der UART-Test ändert ihre Pinbelegung nicht.
+Ohne Option startet das Skript die Wiedergabe direkt und misst die Zeit bis
+BUSY LOW. Mit `--diagnose` setzt es das Modul zurück, fragt Status und Zahl
+der TF-Dateien ab und zeigt Rohantworten an. Bei fehlender Wiedergabe testet
+es zusätzlich kurze 8-Byte-Befehle.

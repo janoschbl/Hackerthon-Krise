@@ -595,6 +595,7 @@ dependencies = [
 display = [
     { name = "luma-lcd" },
     { name = "pillow" },
+    { name = "pyserial" },
     { name = "rpi-lgpio" },
     { name = "spidev" },
 ]
@@ -610,6 +611,7 @@ requires-dist = [
     { name = "luma-lcd", marker = "extra == 'display'", specifier = ">=2.11" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", marker = "extra == 'display'", specifier = ">=10" },
+    { name = "pyserial", marker = "extra == 'display'", specifier = ">=3.5" },
     { name = "pyserial", marker = "extra == 'uart-test'", specifier = ">=3.5" },
     { name = "rpi-lgpio", marker = "extra == 'display'", specifier = ">=0.6" },
     { name = "seaborn", specifier = ">=0.13.2" },

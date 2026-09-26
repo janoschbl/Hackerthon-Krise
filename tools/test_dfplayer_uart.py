@@ -7,6 +7,7 @@ The DFPlayer RX is connected to physical header pin 8 (GPIO14), its TX to
 pin 10 (GPIO15), and both devices share ground. Plays /06/004.mp3.
 """
 
+import argparse
 import time
 
 import lgpio
@@ -47,12 +48,39 @@ def listen(port: serial.Serial, gpio: int, seconds: float) -> bool:
     return busy_seen
 
 
+def play_fast(port: serial.Serial, gpio: int) -> None:
+    started = time.monotonic()
+    send(port, 0x09, low=2)  # TF card needs time to rebuild its file index
+    time.sleep(0.5)
+    send(port, 0x06, low=20)
+    time.sleep(0.5)
+    send(port, 0x0F, high=6, low=4)
+    sent_at = time.monotonic()
+    received = bytearray()
+    deadline = sent_at + 2
+    while time.monotonic() < deadline:
+        received.extend(port.read(32))
+        if lgpio.gpio_read(gpio, 26) == 0:
+            print(f"BUSY LOW nach {time.monotonic() - started:.3f} s ab Start "
+                  f"({time.monotonic() - sent_at:.3f} s nach Play).", flush=True)
+            break
+    else:
+        print("BUSY blieb HIGH: Wiedergabe nicht bestätigt.", flush=True)
+    print(f"RX: {received.hex(' ') if received else 'keine Antwort'}", flush=True)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--diagnose", action="store_true", help="Reset und ausführliche Abfragen")
+    args = parser.parse_args()
     gpio = lgpio.gpiochip_open(0)
     try:
         lgpio.gpio_claim_input(gpio, 26, lgpio.SET_PULL_UP)
         with serial.Serial("/dev/ttyAMA0", 9600, timeout=0.025) as port:
             port.reset_input_buffer()
+            if not args.diagnose:
+                play_fast(port, gpio)
+                return
             print("Setze DFPlayer zurück und warte auf Startmeldung …", flush=True)
             send(port, 0x0C)
             listen(port, gpio, 4)
