@@ -4,23 +4,13 @@ Run on the Pi: .venv/bin/python tools/test_dfplayer.py
 """
 
 from pathlib import Path
-import subprocess
 import sys
 import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from dfplayer_audio import DFPlayer  # noqa: E402
-
-SERVICE = "krise-backend.service"
-
+from picodfplayer import DFPlayer  # noqa: E402
 
 def main():
-    was_running = subprocess.run(
-        ["systemctl", "--user", "is-active", "--quiet", SERVICE], check=False
-    ).returncode == 0
-    if was_running:
-        subprocess.run(["systemctl", "--user", "stop", SERVICE], check=True)
-
     player = None
     try:
         player = DFPlayer(0, 5, 22, 26)
@@ -37,9 +27,6 @@ def main():
     finally:
         if player is not None:
             player.close()
-        if was_running:
-            subprocess.run(["systemctl", "--user", "start", SERVICE], check=True)
-
 
 if __name__ == "__main__":
     main()

@@ -1,114 +1,119 @@
-#DFPlayer mp3 player Driver using UART for Raspberry Pi Pico.
+"""PicoDFPlayer API adapted for Raspberry Pi 5 Linux GPIO.
 
-from machine import UART, Pin
-from utime import sleep_ms, sleep
+Based on https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py
+(MIT license in PICODFPLAYER_LICENSE). GPIO 5 and 22 are not a hardware UART
+pair on the Pi 5, so lgpio generates the 9600-baud transmit waveform on GPIO 5.
+GPIO 22 is reserved as input; GPIO 26 reads the DFPlayer's active-low BUSY pin.
+"""
 
-#Constants
-
-class DFPlayer():
-    UART_BAUD_RATE=9600
-    UART_BITS=8
-    UART_PARITY=None
-    UART_STOP=1
-    
-    START_BYTE = 0x7E
-    VERSION_BYTE = 0xFF
-    COMMAND_LENGTH = 0x06
-    ACKNOWLEDGE = 0x01
-    END_BYTE = 0xEF
-    COMMAND_LATENCY =   500
+import time
 
 
-    def __init__(self, uartInstance, txPin, rxPin, busyPin):
-        self.playerBusy=Pin(busyPin, Pin.IN, Pin.PULL_UP)
-        self.uart = UART(uartInstance, baudrate=self.UART_BAUD_RATE, tx=Pin(txPin), rx=Pin(rxPin), bits=self.UART_BITS, parity=self.UART_PARITY, stop=self.UART_STOP)
+def command_packet(command: int, parameter1: int, parameter2: int) -> bytes:
+    """Build a 10-byte DFPlayer command with its two's-complement checksum."""
+    if any(not 0 <= value <= 255 for value in (command, parameter1, parameter2)):
+        raise ValueError("DFPlayer-Parameter außerhalb 0..255")
+    # Match the original PicoDFPlayer packet, including the ACK request.
+    payload = (0xFF, 0x06, command, 0x01, parameter1, parameter2)
+    checksum = (-sum(payload)) & 0xFFFF
+    return bytes((0x7E, *payload, checksum >> 8, checksum & 0xFF, 0xEF))
 
-    def split(self, num):
-        return num >> 8, num & 0xFF
 
-    def sendcmd(self, command, parameter1, parameter2):
-        checksum = -(self.VERSION_BYTE + self.COMMAND_LENGTH + command + self.ACKNOWLEDGE + parameter1 + parameter2)
-        highByte, lowByte = self.split(checksum)
-        toSend = bytes([b & 0xFF for b in [self.START_BYTE, self.VERSION_BYTE, self.COMMAND_LENGTH, command, self.ACKNOWLEDGE,parameter1, parameter2, highByte, lowByte, self.END_BYTE]])
+class DFPlayer:
+    """DFPlayer control on Pi 5 BCM GPIO 5 (TX), 22 (RX), 26 (BUSY)."""
 
-        self.uart.write(toSend)
-        sleep_ms(self.COMMAND_LATENCY)
-        return self.uart.read()
+    UART_BAUD_RATE = 9600
+    COMMAND_LATENCY = 0.5
+
+    def __init__(self, uartInstance=0, txPin=5, rxPin=22, busyPin=26):
+        if uartInstance != 0:
+            raise ValueError("Nur DFPlayer-UART 0 ist konfiguriert")
+        if len({txPin, rxPin, busyPin}) != 3:
+            raise ValueError("DFPlayer-Pins müssen verschieden sein")
+        import lgpio
+
+        self.gpio = lgpio
+        self.handle = lgpio.gpiochip_open(0)
+        self.tx_pin, self.rx_pin, self.busy_pin = txPin, rxPin, busyPin
+        try:
+            lgpio.group_claim_output(self.handle, [txPin], [1])
+            lgpio.gpio_claim_input(self.handle, rxPin)
+            lgpio.gpio_claim_input(self.handle, busyPin, lgpio.SET_PULL_UP)
+        except Exception:
+            lgpio.gpiochip_close(self.handle)
+            raise
+
+    def sendcmd(self, command, parameter1, parameter2, latency=None):
+        packet = command_packet(command, parameter1, parameter2)
+        # lgpio.pulse(bits, mask, delay): one GPIO in the claimed group.
+        # UART 8N1 sends a LOW start bit, eight LSB-first data bits, HIGH stop.
+        pulses = []
+        for byte in packet:
+            for bit in (0, *(byte >> offset & 1 for offset in range(8)), 1):
+                pulses.append(self.gpio.pulse(bit, 1, 104))
+        self.gpio.tx_wave(self.handle, self.tx_pin, pulses)
+        while self.gpio.tx_busy(self.handle, self.tx_pin, self.gpio.TX_WAVE):
+            time.sleep(0.001)
+        time.sleep(self.COMMAND_LATENCY if latency is None else latency)
 
     def queryBusy(self):
-        return not self.playerBusy.value()
-        
-    #Common DFPlayer control commands
+        return self.gpio.gpio_read(self.handle, self.busy_pin) == 0
+
     def nextTrack(self):
-        self.sendcmd(0x01, 0x00, 0x00)
+        self.sendcmd(0x01, 0, 0)
 
     def prevTrack(self):
-        self.sendcmd(0x02, 0x00, 0x00)
+        self.sendcmd(0x02, 0, 0)
 
     def increaseVolume(self):
-        self.sendcmd(0x04, 0x00, 0x00)
+        self.sendcmd(0x04, 0, 0)
 
     def decreaseVolume(self):
-        self.sendcmd(0x05, 0x00, 0x00)
+        self.sendcmd(0x05, 0, 0)
 
     def setVolume(self, volume):
-        #Volume can be between 0-30
-        self.sendcmd(0x06, 0x00, volume)
+        if not 0 <= volume <= 30:
+            raise ValueError("DFPlayer-Lautstärke muss 0..30 sein")
+        self.sendcmd(0x06, 0, volume)
 
     def setEQ(self, eq):
-        #eq can be o-5
-        #0=Normal
-        #1=Pop
-        #2=Rock
-        #3=Jazz
-        #4=Classic
-        #5=Base
-
-        self.sendcmd(0x07, 0x00, eq)
+        self.sendcmd(0x07, 0, eq)
 
     def setPlaybackMode(self, mode):
-        #Mode can be 0-3
-        #0=Repeat
-        #1=Folder Repeat
-        #2=Single Repeat
-        #3=Random
-        self.sendcmd(0x08, 0x00, mode)
+        self.sendcmd(0x08, 0, mode)
 
     def setPlaybackSource(self, source):
-        #Source can be 0-4
-        #0=U
-        #1=TF
-        #2=AUX
-        #3=SLEEP
-        #4=FLASH
-        self.sendcmd(0x09, 0x00, source)
+        self.sendcmd(0x09, 0, source)
 
     def standby(self):
-        self.sendcmd(0x0A, 0x00, 0x00)
+        self.sendcmd(0x0A, 0, 0)
 
     def normalWorking(self):
-        self.sendcmd(0x0B, 0x00, 0x00)
+        self.sendcmd(0x0B, 0, 0)
 
     def reset(self):
-        self.sendcmd(0x0C, 0x00, 0x00)
+        self.sendcmd(0x0C, 0, 0)
 
     def resume(self):
-        self.sendcmd(0x0D, 0x00, 0x00)
+        self.sendcmd(0x0D, 0, 0)
 
     def pause(self):
-        self.sendcmd(0x0E, 0x00, 0x00)
+        self.sendcmd(0x0E, 0, 0)
 
     def playTrack(self, folder, file):
-        self.sendcmd(0x0F, folder, file)
-                 
+        if not 1 <= folder <= 99 or not 1 <= file <= 255:
+            raise ValueError("Ungültiger DFPlayer-Ordner oder Track")
+        self.sendcmd(0x0F, folder, file, latency=0.05)
+
     def playMP3(self, filenum):
-        a = (filenum >> 8) & 0xff
-        b = filenum & 0xff
-        return self.sendcmd(0x12, a, b)#a, b)
+        if not 1 <= filenum <= 65535:
+            raise ValueError("Ungültige DFPlayer-Dateinummer")
+        return self.sendcmd(0x12, filenum >> 8, filenum & 0xFF)
 
-    #Query System Parameters
     def init(self, params):
-        self.sendcmd(0x3F, 0x00, params)
+        self.sendcmd(0x3F, 0, params)
 
-
-
+    def close(self):
+        if self.handle is not None:
+            self.gpio.gpiochip_close(self.handle)
+            self.handle = None

@@ -23,4 +23,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "client", "SVG_Animation", "dfplayer_audio"]
+py-modules = ["app", "client", "SVG_Animation", "dfplayer_audio", "picodfplayer"]

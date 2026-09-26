@@ -120,10 +120,10 @@ oder 04. Solange BUSY aktiv ist, wartet der Player höchstens drei Sekunden.
 Die Belegung ist GPIO 5 (TX zum DFPlayer-RX), GPIO 22 (reservierter RX-Eingang)
 und GPIO 26 (BUSY). Der Pi 5 nutzt dafür ein softwaregetaktetes 9600-Baud-
 Signal, weil GPIO 5/22 dort kein Hardware-UART-Paar bilden. Die
-Die unveränderte [PicoDFPlayer-Bibliothek](https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py)
-liegt mit ihrer MIT-Lizenz als `picodfplayer.py` im Projekt. Auf dem Linux-Pi
-ist sie nur eine Protokollvorlage: Ihr `machine.UART` benötigt MicroPython
-auf einem Pico. `app.py` verwendet deshalb weiterhin `dfplayer_audio.py`.
+[PicoDFPlayer-Bibliothek](https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py)
+ist für Linux-GPIO in `picodfplayer.py` angepasst (MIT-Lizenz in
+`PICODFPLAYER_LICENSE`). Das Testskript verwendet diese Version;
+`app.py` verwendet vorerst weiterhin `dfplayer_audio.py`.
 Die MP3-Dateien müssen auf der DFPlayer-SD-Karte in `06/` liegen, etwa
 `001.mp3` bis `011.mp3`.
 
@@ -150,9 +150,12 @@ Ein separater Test für das Audiomodul lässt sich per SSH auf dem Pi ausführen
 
 ```bash
 cd ~/hackerthon-krise-laya
+systemctl --user stop krise-backend.service
 .venv/bin/python tools/test_dfplayer.py
+systemctl --user start krise-backend.service
 ```
 
-Das Skript spielt fest `/06/004.mp3`, hält den Backend-Dienst für die
-GPIO-Nutzung kurz an und startet ihn anschließend wieder. Es meldet, ob
-der BUSY-Pin während des Abspielbefehls auf LOW wechselt.
+Das Skript spielt fest `/06/004.mp3` und meldet, ob der BUSY-Pin während
+des Abspielbefehls auf LOW wechselt. Der Backend-Dienst wird davor manuell
+gestoppt und danach wieder gestartet, da nur ein Prozess die GPIO-Pins
+belegen kann.
