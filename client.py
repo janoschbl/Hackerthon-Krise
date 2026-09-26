@@ -25,7 +25,6 @@ async def index(request: Request):
 
 @app.websocket("/ws/deepgram")
 async def proxy_deepgram(websocket: WebSocket):
-    """Leitet Audio und Events zwischen Browser und Backend-App weiter."""
     load_dotenv()
     upstream_url = os.getenv("STT_WS_URL", "ws://localhost:8000/ws/deepgram")
     await websocket.accept()
@@ -87,6 +86,10 @@ async def run_microphone_client():
         if status:
             print(f"Mikrofon-Hinweis: {status}", file=sys.stderr)
         pcm = (np.clip(indata[:, 0], -1.0, 1.0) * 32767).astype("<i2").tobytes()
+
+
+        volume_norm = np.linalg.norm(indata) / np.sqrt(len(indata))
+        print(f'Lautstärke (RMS): {volume_norm:.4f}')
 
         def enqueue():
             try:

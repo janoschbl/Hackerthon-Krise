@@ -9,6 +9,9 @@
   <h1>Live-Transkription</h1>
   <button id="mic">Mikrofon starten</button>
   <p id="status">Bereit</p>
+  <label for="volume">Mikrofon-Lautstärke (RMS)</label>
+  <progress id="volume" max="100" value="0" aria-label="Mikrofon-Lautstärke"></progress>
+  <output id="volume-value" for="volume">0 %</output>
   <h2>Text</h2>
   <p id="transcript">Hier erscheint dein Text.</p>
   <h2>Choice-Score</h2>
@@ -20,6 +23,8 @@
     const transcript = document.querySelector('#transcript');
     const score = document.querySelector('#score');
     const chart = document.querySelector('#chart');
+    const volume = document.querySelector('#volume');
+    const volumeValue = document.querySelector('#volume-value');
     let socket, stream, audioContext, processor, source, muteNode, active = false;
     let finalText = '';
 
@@ -64,7 +69,6 @@
 
     function findChoiceScores(value) {
       if (!value || typeof value !== 'object') return null;
-      // Common response shapes: score.probabilities, score.confidence, or a map of choices to scores.
       for (const key of ['probabilities', 'confidence', 'scores', 'choice_scores']) {
         const scores = value[key];
         if (scores && typeof scores === 'object') {
@@ -94,6 +98,15 @@
         pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
       }
       return pcm.buffer;
+    }
+
+    function showVolume(samples) {
+      let sumSquares = 0;
+      for (let i = 0; i < samples.length; i++) sumSquares += samples[i] * samples[i];
+      const rms = Math.sqrt(sumSquares / Math.max(1, samples.length));
+      const percent = Math.min(100, rms * 100);
+      volume.value = percent;
+      volumeValue.textContent = `${percent.toFixed(1)} %`;
     }
 
     function downsample(samples, fromRate, toRate) {
@@ -150,8 +163,10 @@
           source = audioContext.createMediaStreamSource(stream);
           processor = audioContext.createScriptProcessor(4096, 1, 1);
           processor.onaudioprocess = (event) => {
+            const input = event.inputBuffer.getChannelData(0);
+            showVolume(input);
             if (socket?.readyState !== WebSocket.OPEN) return;
-            const samples = downsample(event.inputBuffer.getChannelData(0), audioContext.sampleRate, 16000);
+            const samples = downsample(input, audioContext.sampleRate, 16000);
             socket.send(toPcm16(samples));
           };
           source.connect(processor);
@@ -179,6 +194,8 @@
       stream?.getTracks().forEach(track => track.stop());
       audioContext?.close();
       processor = source = stream = audioContext = muteNode = null;
+      volume.value = 0;
+      volumeValue.textContent = '0 %';
       button.textContent = 'Mikrofon starten';
       button.disabled = false;
     }
