@@ -3,7 +3,7 @@
 PicoDFPlayer uses MicroPython's machine.UART, which is unavailable on a Pi 5
 running Linux. GPIO 5/6 are not a TX/RX hardware UART pair on that board, so
 lgpio sends the same DFPlayer packets as a timed 9600-baud wave on GPIO 5.
-Feedback is disabled; GPIO 6 is reserved as an RX input and GPIO 26 reads BUSY.
+Feedback is disabled; GPIO 22 is reserved as an RX input and GPIO 26 reads BUSY.
 """
 
 import logging
@@ -51,9 +51,9 @@ def command_packet(command: int, parameter1: int, parameter2: int) -> bytes:
 
 
 class DFPlayer:
-    """The user's DFPlayer(0, 5, 6, 26) pinout on Raspberry Pi 5 Linux."""
+    """The user's DFPlayer(0, 5, 22, 26) pinout on Raspberry Pi 5 Linux."""
 
-    def __init__(self, uart_instance=0, tx_pin=5, rx_pin=6, busy_pin=26):
+    def __init__(self, uart_instance=0, tx_pin=5, rx_pin=22, busy_pin=26):
         if uart_instance != 0:
             raise ValueError("Nur DFPlayer-UART 0 ist konfiguriert")
         import lgpio
@@ -140,7 +140,7 @@ class AudioPlayer:
     def _run(self):
         player = None
         try:
-            player = DFPlayer(0, 5, 6, 26)
+            player = DFPlayer(0, 5, 22, 26)
             if self._stop.wait(1):
                 return
             player.setVolume(30)

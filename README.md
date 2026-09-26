@@ -117,9 +117,9 @@ JEv-Choice-Score von 0 bis 9 wechselt das Display mit den passenden
 Ordner `06` der DFPlayer-SD-Karte. Scores 2–9 verwenden die zugeordneten
 Zufalls-Tracks; bei 0–1 steuert die gemessene Mikrofonlautstärke Track 03
 oder 04. Solange BUSY aktiv ist, wartet der Player höchstens drei Sekunden.
-Die Belegung ist GPIO 5 (TX zum DFPlayer-RX), GPIO 6 (reservierter RX-Eingang)
+Die Belegung ist GPIO 5 (TX zum DFPlayer-RX), GPIO 22 (reservierter RX-Eingang)
 und GPIO 26 (BUSY). Der Pi 5 nutzt dafür ein softwaregetaktetes 9600-Baud-
-Signal, weil GPIO 5/6 dort kein Hardware-UART-Paar bilden. Die
+Signal, weil GPIO 5/22 dort kein Hardware-UART-Paar bilden. Die
 [PicoDFPlayer-Bibliothek](https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py)
 dient als Protokollvorlage; ihr `machine.UART` läuft nur unter MicroPython.
 Die MP3-Dateien müssen auf der DFPlayer-SD-Karte in `06/` liegen, etwa
@@ -148,10 +148,9 @@ Ein separater Test für das Audiomodul lässt sich per SSH auf dem Pi ausführen
 
 ```bash
 cd ~/hackerthon-krise-laya
-.venv/bin/python tools/test_dfplayer.py --track 1
+.venv/bin/python tools/test_dfplayer.py
 ```
 
-Mit `--folder`, `--track`, `--volume` und `--duration` lassen sich Datei und
-Testdauer ändern. Das Skript hält den Backend-Dienst für die GPIO-Nutzung
-kurz an und startet ihn anschließend wieder. Es meldet, ob der BUSY-Pin
-während des Abspielbefehls auf LOW wechselt.
+Das Skript spielt fest `/06/004.mp3`, hält den Backend-Dienst für die
+GPIO-Nutzung kurz an und startet ihn anschließend wieder. Es meldet, ob
+der BUSY-Pin während des Abspielbefehls auf LOW wechselt.
