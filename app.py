@@ -89,6 +89,15 @@ def remember_prediction(prediction, text: str, volume: float | None):
     )
 
 
+def apply_prediction(prediction, text: str, volume: float | None) -> int:
+    """Show the emotion and queue its matching DFPlayer track from folder 06."""
+    score = choice_score(prediction)
+    display_player.set_score(score)
+    audio_player.play(score, volume)
+    remember_prediction(prediction, text, volume)
+    return score
+
+
 TOXICITY_STATE = """Bewerte die Toxizität der Nachricht auf einer ganzzahligen Skala von 0 bis 9.
 0 bedeutet freundlich, neutral oder sachlich. 1-2 bedeutet leicht unhöflich
 oder schroff. 3-5 bedeutet klar unfreundlich oder respektlos, aber ohne
@@ -149,10 +158,7 @@ def hardware_status():
 @app.get("/jev/get-prediction")
 def get_prediction(input_string: str):
     result = predict_toxicity(input_string)
-    score = choice_score(result)
-    display_player.set_score(score)
-    audio_player.play(score, None)
-    remember_prediction(result, input_string, None)
+    apply_prediction(result, input_string, None)
     return {"input": input_string, "result": result}
 
 
@@ -365,10 +371,7 @@ async def deepgram_websocket(websocket: WebSocket):
                                 prediction = await asyncio.to_thread(
                                     predict_toxicity, transcript
                                 )
-                                score = choice_score(prediction)
-                                display_player.set_score(score)
-                                audio_player.play(score, median_volume)
-                                remember_prediction(prediction, transcript, median_volume)
+                                score = apply_prediction(prediction, transcript, median_volume)
                                 await websocket.send_json({
                                     "event": "jev_prediction",
                                     "transcript": transcript,
