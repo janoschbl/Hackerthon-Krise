@@ -1,0 +1,19 @@
+[project]
+name = "hackerthon-krise"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.141.1",
+    "seaborn>=0.13.2",
+    "typesafe-sdk>=0.7.1",
+    "websockets>=13",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["app", "client"]

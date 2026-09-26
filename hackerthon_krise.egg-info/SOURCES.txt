@@ -1,0 +1,9 @@
+README.md
+app.py
+client.py
+pyproject.toml
+hackerthon_krise.egg-info/PKG-INFO
+hackerthon_krise.egg-info/SOURCES.txt
+hackerthon_krise.egg-info/dependency_links.txt
+hackerthon_krise.egg-info/requires.txt
+hackerthon_krise.egg-info/top_level.txt
