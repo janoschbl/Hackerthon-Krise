@@ -143,3 +143,15 @@ Für den automatischen Start liegt die systemd-Unit in
 krise-backend.service` aktiviert und durch `loginctl enable-linger guenther`
 auch ohne Anmeldung beim Boot gestartet. Der installierte Dienst ist mit
 `systemctl --user status krise-backend.service` prüfbar.
+
+Ein separater Test für das Audiomodul lässt sich per SSH auf dem Pi ausführen:
+
+```bash
+cd ~/hackerthon-krise-laya
+.venv/bin/python tools/test_dfplayer.py --track 1
+```
+
+Mit `--folder`, `--track`, `--volume` und `--duration` lassen sich Datei und
+Testdauer ändern. Das Skript hält den Backend-Dienst für die GPIO-Nutzung
+kurz an und startet ihn anschließend wieder. Es meldet, ob der BUSY-Pin
+während des Abspielbefehls auf LOW wechselt.

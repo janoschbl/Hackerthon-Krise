@@ -69,7 +69,7 @@ class DFPlayer:
             lgpio.gpiochip_close(self.handle)
             raise
 
-    def sendcmd(self, command: int, parameter1: int, parameter2: int):
+    def sendcmd(self, command: int, parameter1: int, parameter2: int, latency: float = 0.5):
         packet = command_packet(command, parameter1, parameter2)
         # 8N1, LSB first. Each bit lasts about 104 us (9600 baud).
         pulses = []
@@ -79,7 +79,7 @@ class DFPlayer:
         self.gpio.tx_wave(self.handle, self.tx_pin, pulses)
         while self.gpio.tx_busy(self.handle, self.tx_pin, self.gpio.TX_WAVE):
             time.sleep(0.001)
-        time.sleep(0.5)
+        time.sleep(latency)
 
     def setVolume(self, volume: int):
         if not 0 <= volume <= 30:
@@ -89,7 +89,7 @@ class DFPlayer:
     def playTrack(self, folder: int, track: int):
         if not 1 <= folder <= 99 or not 1 <= track <= 255:
             raise ValueError("Ungültiger DFPlayer-Ordner oder Track")
-        self.sendcmd(0x0F, folder, track)
+        self.sendcmd(0x0F, folder, track, latency=0.05)
 
     def queryBusy(self) -> bool:
         return self.gpio.gpio_read(self.handle, self.busy_pin) == 0
@@ -108,6 +108,7 @@ class AudioPlayer:
         self.error = None
         self.last_track = None
         self.last_played_at = None
+        self.last_busy_seen = None
 
     def start(self):
         if self._thread is None:
@@ -153,7 +154,17 @@ class AudioPlayer:
                         player.playTrack(6, track)
                         self.last_track = track
                         self.last_played_at = time.time()
-                        logger.info("DFPlayer spielt Ordner 06, Track %02d", track)
+                        self.last_busy_seen = False
+                        deadline = time.monotonic() + 1
+                        while time.monotonic() < deadline and not self._stop.is_set():
+                            if player.queryBusy():
+                                self.last_busy_seen = True
+                                break
+                            self._stop.wait(0.025)
+                        if self.last_busy_seen:
+                            logger.info("DFPlayer BUSY bestätigt Ordner 06, Track %02d", track)
+                        else:
+                            logger.warning("DFPlayer-Befehl gesendet, aber BUSY blieb hoch (Track %02d)", track)
                         break
                     self._stop.wait(0.1)
         except Exception as exc:

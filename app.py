@@ -142,6 +142,7 @@ def hardware_status():
         "audio_error": str(audio_player.error) if audio_player.error else None,
         "last_audio_track": audio_player.last_track,
         "last_audio_at": audio_player.last_played_at,
+        "last_audio_busy_seen": audio_player.last_busy_seen,
     }
 
 
