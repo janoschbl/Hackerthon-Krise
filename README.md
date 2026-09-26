@@ -159,3 +159,13 @@ Das Skript spielt fest `/06/004.mp3` und meldet, ob der BUSY-Pin während
 des Abspielbefehls auf LOW wechselt. Der Backend-Dienst wird davor manuell
 gestoppt und danach wieder gestartet, da nur ein Prozess die GPIO-Pins
 belegen kann.
+
+Zum Vergleich kann bei gestopptem Dienst das kurze DFPlayer-Protokoll ohne
+Prüfsumme getestet werden:
+
+```bash
+.venv/bin/python tools/test_dfplayer_simple.py
+```
+
+Es versucht zuerst `/06/004.mp3` und bei ausbleibendem BUSY-Signal den
+globalen Track 4. Dieser kann eine andere Datei auf der SD-Karte sein.
