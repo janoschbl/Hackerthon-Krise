@@ -3,6 +3,8 @@
 ## Live-Transkription mit Deepgram
 
 `app.py` bietet `/ws/deepgram` als direkten WebSocket-Stream zu Deepgram Flux.
+Flux Multilingual verwendet `language_hint=de`, um deutsche Sprache bevorzugt
+zu erkennen. Nach spätestens drei Sekunden Stille beendet Deepgram einen begonnenen Turn.
 Der Client sendet rohe PCM-Audiodaten als Binärframes: 16 kHz, mono, signed
 16-bit little-endian (`linear16`). Deepgram liefert laufende `Update`-Texte
 und bei erkannter Sprechpause einen finalen `EndOfTurn`. Die Serverantwort
@@ -29,6 +31,13 @@ Score live an. Der Client leitet den Audiostream an den Backend-Server auf
 Port 8000 weiter; bei jedem finalen Turn ruft dieser JEv mit
 `OPENROUTER_API_KEY` auf. Der Mikrofonzugriff funktioniert auf `localhost`
 oder über HTTPS.
+
+`GET /jev/get-last-prediction` liefert die letzte Vorhersage als `prediction`,
+den erkannten `text` und die mediane Mikrofonlautstärke als `volume` (RMS von
+0 bis 1). Audio-Chunks unter 3 % Lautstärke zählen nicht zum Median. Drei
+Sekunden nach der letzten Vorhersage sind alle drei Felder wieder `null`.
+`GET /jev/get-prediction?input_string=...` behält sein bisheriges Format mit
+`input` und `result`.
 
 Alternativ kannst du den Laptop-Mikrofon-Client im Terminal starten. Er streamt
 16-kHz-Mono-PCM über WebSocket und zeigt Live-Transkripte:

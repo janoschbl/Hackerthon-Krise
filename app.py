@@ -1,7 +1,12 @@
 import asyncio
+from collections import deque
 import json
 import logging
+import math
 import os
+import statistics
+import struct
+import time
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -17,6 +22,28 @@ from fastapi.templating import Jinja2Templates
 app = FastAPI()
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+LAST_PREDICTION_SECONDS = 3.0
+MIN_VOLUME = 0.03
+last_prediction = None
+
+
+def audio_volume(audio: bytes) -> float:
+    """Return the RMS of 16-bit little-endian PCM as a value from 0 to 1."""
+    if len(audio) < 2:
+        return 0.0
+    samples = struct.iter_unpack("<h", audio[:len(audio) - len(audio) % 2])
+    count = len(audio) // 2
+    return math.sqrt(sum(sample * sample for (sample,) in samples) / count) / 32768
+
+
+def remember_prediction(prediction, text: str, volume: float | None):
+    global last_prediction
+    last_prediction = (
+        time.monotonic(),
+        {"prediction": prediction, "text": text, "volume": volume},
+    )
+
 
 TOXICITY_STATE = """Bewerte die Toxizität der Nachricht auf einer ganzzahligen Skala von 0 bis 9.
 0 bedeutet freundlich, neutral oder sachlich. 1-2 bedeutet leicht unhöflich
@@ -64,7 +91,23 @@ def read_root():
 
 @app.get("/jev/get-prediction")
 def get_prediction(input_string: str):
-    return {"input": input_string, "result": predict_toxicity(input_string)}
+    result = predict_toxicity(input_string)
+    remember_prediction(result, input_string, None)
+    return {"input": input_string, "result": result}
+
+
+@app.get("/jev/get-last-prediction")
+def get_last_prediction():
+    global last_prediction
+    latest = last_prediction
+    if latest is None:
+        return {"prediction": None, "text": None, "volume": None}
+    timestamp, result = latest
+    if time.monotonic() - timestamp > LAST_PREDICTION_SECONDS:
+        if last_prediction is latest:
+            last_prediction = None
+        return {"prediction": None, "text": None, "volume": None}
+    return result
 
 
 @app.websocket("/ws/stt")
@@ -169,6 +212,7 @@ async def deepgram_websocket(websocket: WebSocket):
         "encoding": "linear16",
         "sample_rate": "16000",
         "language_hint": "de",
+        "eot_timeout_ms": "3000",
     }
     upstream_url = f"wss://api.deepgram.com/v2/listen?{urlencode(params)}"
     await websocket.accept()
@@ -180,6 +224,7 @@ async def deepgram_websocket(websocket: WebSocket):
         ) as upstream:
             paused = False
             stopped = False
+            recent_volumes = deque(maxlen=256)
 
             async def client_to_deepgram():
                 nonlocal paused, stopped
@@ -190,6 +235,12 @@ async def deepgram_websocket(websocket: WebSocket):
                     audio = message.get("bytes")
                     if audio is not None:
                         if not paused and not stopped:
+                            now = time.monotonic()
+                            volume = audio_volume(audio)
+                            if volume >= MIN_VOLUME:
+                                recent_volumes.append((now, volume))
+                            while recent_volumes and now - recent_volumes[0][0] > LAST_PREDICTION_SECONDS:
+                                recent_volumes.popleft()
                             await upstream.send(audio)
                         continue
 
@@ -246,9 +297,15 @@ async def deepgram_websocket(websocket: WebSocket):
                         transcript = (payload.get("transcript") or "").strip()
                         if transcript:
                             try:
+                                now = time.monotonic()
+                                volumes = [volume for timestamp, volume in recent_volumes
+                                           if now - timestamp <= LAST_PREDICTION_SECONDS]
+                                median_volume = statistics.median(volumes) if volumes else None
+                                recent_volumes.clear()
                                 prediction = await asyncio.to_thread(
                                     predict_toxicity, transcript
                                 )
+                                remember_prediction(prediction, transcript, median_volume)
                                 await websocket.send_json({
                                     "event": "jev_prediction",
                                     "transcript": transcript,
