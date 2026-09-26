@@ -27,6 +27,10 @@ ROTATE = 0
 BGR = True
 H_OFFSET = 0
 V_OFFSET = 0
+DISPLAY_STARTUP_DELAY = 5.0
+RESET_HOLD_TIME = 0.1
+RESET_RELEASE_TIME = 0.2
+DISPLAY_WARMUP_FRAME_SECONDS = 1.0
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +39,11 @@ def init_display():
     from luma.core.interface.serial import spi
     from luma.lcd.device import st7735
 
-    serial = spi(port=SPI_PORT, device=SPI_DEVICE, gpio_DC=GPIO_DC, gpio_RST=GPIO_RST)
+    serial = spi(
+        port=SPI_PORT, device=SPI_DEVICE, gpio_DC=GPIO_DC, gpio_RST=GPIO_RST,
+        reset_hold_time=RESET_HOLD_TIME,
+        reset_release_time=RESET_RELEASE_TIME,
+    )
     return st7735(
         serial, width=DISPLAY_WIDTH, height=DISPLAY_HEIGHT, rotate=ROTATE,
         bgr=BGR, h_offset=H_OFFSET, v_offset=V_OFFSET,
@@ -107,7 +115,16 @@ class AnimationPlayer:
 
     def _run(self):
         try:
+            # Give the display power time to settle after a Pi reboot.
+            if self._stop.wait(DISPLAY_STARTUP_DELAY):
+                return
             display = init_display()
+            from PIL import Image
+            size = (display.width, display.height)
+            for color in ((255, 0, 0), (0, 255, 0), (0, 0, 255)):
+                display.display(Image.new("RGB", size, color))
+                if self._stop.wait(DISPLAY_WARMUP_FRAME_SECONDS):
+                    return
             poses, idle, events, transitions = load_frames(display)
             display.display(poses[0])
             idle_index = 0
