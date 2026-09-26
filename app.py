@@ -142,6 +142,11 @@ def read_root():
     return {"Hello": "World"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
 @app.get("/hardware/status")
 def hardware_status():
     return {

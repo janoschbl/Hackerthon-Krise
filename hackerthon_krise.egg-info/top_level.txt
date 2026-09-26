@@ -1,2 +1,5 @@
+SVG_Animation
 app
 client
+dfplayer_audio
+picodfplayer

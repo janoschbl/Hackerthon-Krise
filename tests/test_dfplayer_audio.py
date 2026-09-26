@@ -22,6 +22,13 @@ class DFPlayerProtocolTests(unittest.TestCase):
             self.assertEqual(select_track(0, 0.33), 3)
             self.assertEqual(select_track(1, 1), 4)
 
+    def test_previous_track_is_excluded(self):
+        with patch('dfplayer_audio.random.choice', side_effect=lambda values: values[0]):
+            self.assertEqual(select_track(2, None, previous_track=1), 12)
+            self.assertEqual(select_track(5, None, previous_track=7), 9)
+            self.assertEqual(select_track(9, None, previous_track=2), 8)
+            self.assertIsNone(select_track(0, 0.33, previous_track=3))
+
     def test_hardware_uart_writes_complete_packet(self):
         class FakePort:
             def __init__(self):

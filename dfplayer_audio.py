@@ -9,9 +9,9 @@ import time
 logger = logging.getLogger(__name__)
 
 AUDIO_TOX = {
-    2: [1],
-    3: [1, 10],
-    4: [1, 7, 10],
+    2: [1, 12, 6, 7],
+    3: [1, 10, 6, 12, 7],
+    4: [1, 7, 10, 2],
     5: [7, 9, 11],
     6: [6, 9, 11],
     7: [5, 6],
@@ -21,18 +21,24 @@ AUDIO_TOX = {
 AUDIO_VOL = {1: [3], 2: [4]}
 
 
-def select_track(score: int, volume: float | None) -> int | None:
-    """Pick a track in SD-card folder 06 using the supplied score and RMS."""
+def track_options(score: int, volume: float | None) -> list[int]:
+    """Return the tracks allowed for this score and RMS."""
     if not 0 <= score <= 9:
         raise ValueError("score muss zwischen 0 und 9 liegen")
     if score >= 2:
-        return random.choice(AUDIO_TOX[score])
+        return AUDIO_TOX[score]
     if volume is None:
-        return None
+        return []
     # The original volume rule rounds RMS percentages into levels. Clamp the
     # top level to 2 because the supplied table has no level 3.
     level = min(2, max(0, round(max(0.0, min(1.0, volume)) * 100 / 33)))
-    return random.choice(AUDIO_VOL[level]) if level in AUDIO_VOL else None
+    return AUDIO_VOL.get(level, [])
+
+
+def select_track(score: int, volume: float | None, previous_track: int | None = None) -> int | None:
+    """Pick a track in SD-card folder 06 without repeating the last one."""
+    candidates = [track for track in track_options(score, volume) if track != previous_track]
+    return random.choice(candidates) if candidates else None
 
 
 def command_packet(command: int, parameter1: int, parameter2: int) -> bytes:
@@ -115,10 +121,9 @@ class AudioPlayer:
             self._thread.join(timeout=2)
 
     def play(self, score: int, volume: float | None):
-        track = select_track(score, volume)
-        if track is None:
+        if not track_options(score, volume):
             return
-        event = (time.monotonic(), track)
+        event = (time.monotonic(), score, volume)
         try:
             self._events.put_nowait(event)
         except queue.Full:
@@ -143,11 +148,14 @@ class AudioPlayer:
                 return
             while not self._stop.is_set():
                 try:
-                    created, track = self._events.get(timeout=0.2)
+                    created, score, volume = self._events.get(timeout=0.2)
                 except queue.Empty:
                     continue
                 while not self._stop.is_set() and time.monotonic() - created <= 3:
                     if not player.queryBusy():
+                        track = select_track(score, volume, self.last_track)
+                        if track is None:
+                            break
                         player.playTrack(6, track)
                         self.last_track = track
                         self.last_played_at = time.time()

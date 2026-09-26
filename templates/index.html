@@ -4,9 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Live-Transkription</title>
+  <style>
+    #backend-health[data-state="online"] { color: #176a32; }
+    #backend-health[data-state="offline"] { color: #b42318; }
+  </style>
 </head>
 <body>
   <h1>Live-Transkription</h1>
+  <p id="backend-health" role="status" aria-live="polite">Raspberry Pi: prüfe Verbindung …</p>
   <button id="mic">Mikrofon starten</button>
   <p id="status">Bereit</p>
   <label for="volume">Mikrofon-Lautstärke (RMS)</label>
@@ -22,6 +27,7 @@
        alt="Animierte Pose für Choice-Score 0" style="display:block; background:#fff;">
   <script>
     const button = document.querySelector('#mic');
+    const backendHealth = document.querySelector('#backend-health');
     const status = document.querySelector('#status');
     const transcript = document.querySelector('#transcript');
     const score = document.querySelector('#score');
@@ -31,6 +37,22 @@
     const avatar = document.querySelector('#avatar');
     let socket, stream, audioContext, processor, source, muteNode, active = false;
     let finalText = '';
+
+    async function checkBackendHealth() {
+      let online = false;
+      try {
+        const response = await fetch('/backend/health', { cache: 'no-store' });
+        online = response.ok && (await response.json()).online === true;
+      } catch (error) {
+        console.debug('Pi-Status nicht erreichbar:', error);
+      }
+      backendHealth.dataset.state = online ? 'online' : 'offline';
+      backendHealth.textContent = `Raspberry Pi: ${online ? 'online' : 'offline'}`;
+    }
+
+    checkBackendHealth();
+    setInterval(checkBackendHealth, 3000);
+    window.addEventListener('online', checkBackendHealth);
 
     const avatarSequences = new Map();
     let avatarScore = 0;

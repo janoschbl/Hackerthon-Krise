@@ -1,9 +1,13 @@
 README.md
+SVG_Animation.py
 app.py
 client.py
+dfplayer_audio.py
+picodfplayer.py
 pyproject.toml
 hackerthon_krise.egg-info/PKG-INFO
 hackerthon_krise.egg-info/SOURCES.txt
 hackerthon_krise.egg-info/dependency_links.txt
 hackerthon_krise.egg-info/requires.txt
 hackerthon_krise.egg-info/top_level.txt
+tests/test_dfplayer_audio.py

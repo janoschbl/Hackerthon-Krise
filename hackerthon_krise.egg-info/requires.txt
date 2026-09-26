@@ -6,3 +6,13 @@ seaborn>=0.13.2
 sounddevice>=0.5
 typesafe-sdk>=0.7.1
 websockets>=13
+
+[display]
+luma.lcd>=2.11
+Pillow>=10
+rpi-lgpio>=0.6
+spidev>=3.6
+pyserial>=3.5
+
+[uart-test]
+pyserial>=3.5

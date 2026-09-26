@@ -4,6 +4,8 @@ import logging
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
+from urllib.request import urlopen
 
 import numpy as np
 import sounddevice as sd
@@ -23,9 +25,36 @@ logger = logging.getLogger(__name__)
 DEFAULT_STT_WS_URL = "ws://172.16.1.224:8000/ws/deepgram"
 
 
+def backend_health_url() -> str:
+    load_dotenv()
+    websocket_url = os.getenv("STT_WS_URL", DEFAULT_STT_WS_URL)
+    parts = urlsplit(websocket_url)
+    scheme = {"ws": "http", "wss": "https"}.get(parts.scheme)
+    if not scheme or not parts.netloc:
+        raise ValueError("STT_WS_URL muss eine ws://- oder wss://-Adresse sein")
+    return urlunsplit((scheme, parts.netloc, "/health", "", ""))
+
+
+def fetch_backend_health() -> bool:
+    with urlopen(backend_health_url(), timeout=1.5) as response:
+        if response.status != 200:
+            return False
+        payload = json.load(response)
+        return isinstance(payload, dict) and payload.get("status") == "ok"
+
+
 @app.get("/")
 async def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
+
+
+@app.get("/backend/health")
+async def backend_health():
+    try:
+        online = await asyncio.to_thread(fetch_backend_health)
+    except (OSError, ValueError, json.JSONDecodeError):
+        online = False
+    return {"online": online}
 
 
 @app.websocket("/ws/deepgram")
