@@ -19,11 +19,13 @@ from starlette.websockets import WebSocketState
 from typesafe_sdk import TypeSafeClient
 
 from SVG_Animation import AnimationPlayer
+from dfplayer_audio import AudioPlayer
 
 logger = logging.getLogger(__name__)
 load_dotenv()
 
 display_player = AnimationPlayer()
+audio_player = AudioPlayer()
 
 
 @asynccontextmanager
@@ -33,7 +35,10 @@ async def lifespan(_app: FastAPI):
     enabled = os.getenv("DISPLAY_ENABLED", "auto").lower()
     if enabled == "1" or (enabled == "auto" and os.path.exists("/dev/spidev0.0")):
         display_player.start()
+    if os.getenv("AUDIO_ENABLED", "0") == "1":
+        audio_player.start()
     yield
+    audio_player.stop()
     display_player.stop()
 
 
@@ -128,10 +133,24 @@ def read_root():
     return {"Hello": "World"}
 
 
+@app.get("/hardware/status")
+def hardware_status():
+    return {
+        "display_running": bool(display_player._thread and display_player._thread.is_alive()),
+        "display_error": str(display_player.error) if display_player.error else None,
+        "audio_running": bool(audio_player._thread and audio_player._thread.is_alive()),
+        "audio_error": str(audio_player.error) if audio_player.error else None,
+        "last_audio_track": audio_player.last_track,
+        "last_audio_at": audio_player.last_played_at,
+    }
+
+
 @app.get("/jev/get-prediction")
 def get_prediction(input_string: str):
     result = predict_toxicity(input_string)
-    display_player.set_score(choice_score(result))
+    score = choice_score(result)
+    display_player.set_score(score)
+    audio_player.play(score, None)
     remember_prediction(result, input_string, None)
     return {"input": input_string, "result": result}
 
@@ -347,6 +366,7 @@ async def deepgram_websocket(websocket: WebSocket):
                                 )
                                 score = choice_score(prediction)
                                 display_player.set_score(score)
+                                audio_player.play(score, median_volume)
                                 remember_prediction(prediction, transcript, median_volume)
                                 await websocket.send_json({
                                     "event": "jev_prediction",

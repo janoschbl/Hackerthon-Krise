@@ -98,7 +98,7 @@ ws.onopen = () => ws.send(JSON.stringify({ language: "de" }));
 // ws.send(JSON.stringify({ event: "stop" }));
 ```
 
-## Raspberry Pi und Avatar-Display
+## Raspberry Pi, Avatar-Display und Audio
 
 `app.py` läuft auf dem Raspberry Pi unter `guenther@172.16.1.224` auf Port 8000.
 `client.py` läuft auf dem Laptop und verbindet sich über die obige
@@ -113,14 +113,33 @@ GPIO 25 (Reset). Die fertigen PNGs in `assets/frames` stammen aus
 JEv-Choice-Score von 0 bis 9 wechselt das Display mit den passenden
 Übergangsframes zur jeweiligen Pose und spielt deren Idle-Animation.
 
+`dfplayer_audio.py` spielt pro neuer Vorhersage höchstens einen Track aus
+Ordner `06` der DFPlayer-SD-Karte. Scores 2–9 verwenden die zugeordneten
+Zufalls-Tracks; bei 0–1 steuert die gemessene Mikrofonlautstärke Track 03
+oder 04. Solange BUSY aktiv ist, wartet der Player höchstens drei Sekunden.
+Die Belegung ist GPIO 5 (TX zum DFPlayer-RX), GPIO 6 (reservierter RX-Eingang)
+und GPIO 26 (BUSY). Der Pi 5 nutzt dafür ein softwaregetaktetes 9600-Baud-
+Signal, weil GPIO 5/6 dort kein Hardware-UART-Paar bilden. Die
+[PicoDFPlayer-Bibliothek](https://github.com/mannbro/PicoDFPlayer/blob/main/picodfplayer.py)
+dient als Protokollvorlage; ihr `machine.UART` läuft nur unter MicroPython.
+Die MP3-Dateien müssen auf der DFPlayer-SD-Karte in `06/` liegen, etwa
+`001.mp3` bis `011.mp3`.
+
 Auf dem Pi installieren und starten:
 
 ```bash
 uv sync --extra display
-DISPLAY_ENABLED=1 uv run uvicorn app:app --host 0.0.0.0 --port 8000
+DISPLAY_ENABLED=1 AUDIO_ENABLED=1 uv run uvicorn app:app --host 0.0.0.0 --port 8000
 ```
 
 `DEEPGRAM_API_KEY` und `OPENROUTER_API_KEY` müssen in der `.env` des Pi
 stehen. `DISPLAY_ENABLED=auto` startet die Anzeige, wenn `/dev/spidev0.0`
 vorhanden ist; `DISPLAY_ENABLED=0` deaktiviert sie. Nur ein Prozess darf
 das Display und die GPIO-Pins gleichzeitig verwenden.
+
+Für den automatischen Start liegt die systemd-Unit in
+`deploy/krise-backend.service`. Auf dem Pi wird sie unter
+`~/.config/systemd/user/` installiert, mit `systemctl --user enable --now
+krise-backend.service` aktiviert und durch `loginctl enable-linger guenther`
+auch ohne Anmeldung beim Boot gestartet. Der installierte Dienst ist mit
+`systemctl --user status krise-backend.service` prüfbar.
