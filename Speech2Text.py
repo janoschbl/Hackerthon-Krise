@@ -10,11 +10,13 @@ import sounddevice as sd
 from deepgram import DeepgramClient
 from deepgram.core.events import EventType
 from dotenv import load_dotenv
+from websockets.sync.client import connect as ws_connect
 
 load_dotenv()
 
 SAMPLE_RATE = 16_000
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY", "")
+TRANSCRIPT_WS_URL = os.getenv("TRANSCRIPT_WS_URL", "")
 
 
 def _fit_to_terminal(prefix, text):
@@ -40,6 +42,7 @@ def main():
 
 	client = DeepgramClient(api_key=DEEPGRAM_API_KEY)
 	audio_queue = Queue()
+	transcript_queue = Queue()
 	print_lock = Lock()
 	recording_started_at = [0.0]
 	last_live_text = [None]
@@ -100,6 +103,10 @@ def main():
 				print(final_text, flush=True)
 			last_live_text[0] = None
 
+		if TRANSCRIPT_WS_URL:
+			# Jeder fertige Turn wird als ein Token/eine Nachricht gestreamt.
+			transcript_queue.put(text)
+
 	def on_error(error):
 		with print_lock:
 			print(f"Deepgram-Fehler: {error}", flush=True)
@@ -132,6 +139,31 @@ def main():
 		sender = Thread(target=send_audio, daemon=True)
 		sender.start()
 
+		def send_transcripts():
+			ws = None
+			try:
+				while True:
+					token = transcript_queue.get()
+					try:
+						if token is None:
+							return
+						if ws is None:
+							ws = ws_connect(TRANSCRIPT_WS_URL, open_timeout=5)
+						ws.send(token)
+					except Exception as error:
+						with print_lock:
+							print(f"Transkript konnte nicht gestreamt werden: {error}", flush=True)
+						ws = None
+					finally:
+						transcript_queue.task_done()
+			finally:
+				if ws is not None:
+					ws.close()
+
+		transcript_sender = Thread(target=send_transcripts, daemon=True)
+		if TRANSCRIPT_WS_URL:
+			transcript_sender.start()
+
 		def capture_audio(indata, frames, time_info, status):
 			if status:
 				with print_lock:
@@ -157,6 +189,9 @@ def main():
 		finally:
 			audio_queue.put(None)
 			sender.join()
+			if TRANSCRIPT_WS_URL:
+				transcript_queue.put(None)
+				transcript_sender.join(timeout=5)
 			connection.send_close_stream()
 			listener.join(timeout=5)
 
