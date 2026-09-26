@@ -148,6 +148,7 @@
             status.textContent = 'Satz erkannt, Bewertung läuft …';
           } else if (event.event === 'jev_prediction') {
             showScore(event.result);
+            if (Number.isInteger(event.score)) score.textContent = String(event.score);
             status.textContent = 'Live';
           } else if (event.event === 'jev_error' || event.event === 'error') {
             status.textContent = `Fehler: ${event.message}`;

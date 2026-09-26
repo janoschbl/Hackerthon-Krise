@@ -16,6 +16,7 @@ from starlette.websockets import WebSocketState
 app = FastAPI(title="Live-Transkript Client")
 templates = Jinja2Templates(directory="templates")
 logger = logging.getLogger(__name__)
+DEFAULT_STT_WS_URL = "ws://172.16.1.224:8000/ws/deepgram"
 
 
 @app.get("/")
@@ -26,7 +27,7 @@ async def index(request: Request):
 @app.websocket("/ws/deepgram")
 async def proxy_deepgram(websocket: WebSocket):
     load_dotenv()
-    upstream_url = os.getenv("STT_WS_URL", "ws://localhost:8000/ws/deepgram")
+    upstream_url = os.getenv("STT_WS_URL", DEFAULT_STT_WS_URL)
     await websocket.accept()
     try:
         async with websockets.connect(upstream_url, max_size=None) as upstream:
@@ -77,7 +78,7 @@ async def proxy_deepgram(websocket: WebSocket):
 
 async def run_microphone_client():
     load_dotenv()
-    server_url = os.getenv("STT_WS_URL", "ws://localhost:8000/ws/deepgram")
+    server_url = os.getenv("STT_WS_URL", DEFAULT_STT_WS_URL)
     sample_rate = 16_000
     loop = asyncio.get_running_loop()
     audio_queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)

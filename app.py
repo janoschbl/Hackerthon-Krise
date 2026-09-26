@@ -7,6 +7,7 @@ import os
 import statistics
 import struct
 import time
+from contextlib import asynccontextmanager
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -17,15 +18,53 @@ from starlette.websockets import WebSocketState
 
 from typesafe_sdk import TypeSafeClient
 
-from fastapi.templating import Jinja2Templates
+from SVG_Animation import AnimationPlayer
 
-app = FastAPI()
 logger = logging.getLogger(__name__)
 load_dotenv()
+
+display_player = AnimationPlayer()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # The laptop can import app.py without GPIO hardware; the Pi starts the
+    # player automatically when SPI0 is enabled.
+    enabled = os.getenv("DISPLAY_ENABLED", "auto").lower()
+    if enabled == "1" or (enabled == "auto" and os.path.exists("/dev/spidev0.0")):
+        display_player.start()
+    yield
+    display_player.stop()
+
+
+app = FastAPI(lifespan=lifespan)
 
 LAST_PREDICTION_SECONDS = 3.0
 MIN_VOLUME = 0.03
 last_prediction = None
+
+
+def choice_score(prediction) -> int:
+    """Read the 0..9 choice from the JEv answer without coercing bad values."""
+    value = prediction.get("score") if isinstance(prediction, dict) else prediction
+    for _ in range(4):
+        if isinstance(value, dict):
+            for key in ("choice", "value", "answer", "score"):
+                if key in value:
+                    value = value[key]
+                    break
+            else:
+                raise ValueError(f"JEv-Score hat kein Choice-Feld: {value!r}")
+        else:
+            break
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError(f"Ungültiger JEv-Score: {value!r}")
+    if isinstance(value, str) and (len(value) != 1 or not value.isdigit()):
+        raise ValueError(f"Ungültiger JEv-Score: {value!r}")
+    score = int(value)
+    if not 0 <= score <= 9:
+        raise ValueError(f"JEv-Score außerhalb 0..9: {score}")
+    return score
 
 
 def audio_volume(audio: bytes) -> float:
@@ -92,6 +131,7 @@ def read_root():
 @app.get("/jev/get-prediction")
 def get_prediction(input_string: str):
     result = predict_toxicity(input_string)
+    display_player.set_score(choice_score(result))
     remember_prediction(result, input_string, None)
     return {"input": input_string, "result": result}
 
@@ -305,11 +345,14 @@ async def deepgram_websocket(websocket: WebSocket):
                                 prediction = await asyncio.to_thread(
                                     predict_toxicity, transcript
                                 )
+                                score = choice_score(prediction)
+                                display_player.set_score(score)
                                 remember_prediction(prediction, transcript, median_volume)
                                 await websocket.send_json({
                                     "event": "jev_prediction",
                                     "transcript": transcript,
                                     "result": prediction,
+                                    "score": score,
                                 })
                             except Exception as error:
                                 await websocket.send_json({

@@ -15,9 +15,12 @@ dependencies = [
     "websockets>=13",
 ]
 
+[project.optional-dependencies]
+display = ["luma.lcd>=2.11", "Pillow>=10", "rpi-lgpio>=0.6", "spidev>=3.6"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-py-modules = ["app", "client"]
+py-modules = ["app", "client", "SVG_Animation"]
