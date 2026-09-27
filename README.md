@@ -29,13 +29,16 @@ uv run uvicorn client:app --reload --port 8001
 Mikrofon-Button Browser-Audio auf, zeigt Transkript-Updates und den Choice-
 Score sowie die passende Avatar-Animation live an. Der Client leitet den Audiostream an den Backend-Server auf
 Port 8000 weiter; bei jedem finalen Turn ruft dieser JEv mit
-`OPENROUTER_API_KEY` auf. Der Mikrofonzugriff funktioniert auf `localhost`
-oder über HTTPS.
+`OPENROUTER_API_KEY` auf. Das Mikrofon bleibt bis zum Klick auf „Mikrofon stoppen“
+an; bei Verbindungsabbruch versucht der Browser, die Verbindung erneut aufzubauen.
+Der Mikrofonzugriff funktioniert auf `localhost` oder über HTTPS.
 
 `GET /jev/get-last-prediction` liefert die letzte Vorhersage als `prediction`,
 den erkannten `text` und die mediane Mikrofonlautstärke als `volume` (RMS von
 0 bis 1). Audio-Chunks unter 3 % Lautstärke zählen nicht zum Median. Drei
-Sekunden nach der letzten Vorhersage sind alle drei Felder wieder `null`.
+Sekunden ohne neuen erkannten Text wird der Choice-Score auf 0 gesetzt und
+das Display kehrt zur Idle-Pose zurück. Der Endpoint gibt dann
+`{"prediction":{"score":"0"},"text":null,"volume":null}` zurück.
 `GET /jev/get-prediction?input_string=...` behält sein bisheriges Format mit
 `input` und `result`.
 
@@ -112,6 +115,10 @@ GPIO 25 (Reset). Die fertigen PNGs in `assets/frames` stammen aus
 `assets/animation.svg`; zur Laufzeit wird kein Browser benötigt. Bei jedem
 JEv-Choice-Score von 0 bis 9 wechselt das Display mit den passenden
 Übergangsframes zur jeweiligen Pose und spielt deren Idle-Animation.
+`DISPLAY_BACKGROUND_RGB=48,54,64` bestimmt die Helligkeit der dunklen
+Hintergrundpixel beim Laden der Frames. Größere RGB-Werte machen den
+Hintergrund heller; die Einstellung regelt nicht die physische
+Hintergrundbeleuchtung.
 
 `dfplayer_audio.py` spielt pro neuer Vorhersage höchstens einen Track aus
 Ordner `06` der DFPlayer-SD-Karte. Scores 2–9 verwenden die zugeordneten

@@ -6,6 +6,7 @@ pre-rendered PNGs so no browser or SVG renderer is needed at runtime.
 
 from pathlib import Path
 import logging
+import os
 import random
 import threading
 import time
@@ -24,7 +25,7 @@ GPIO_RST = 25
 DISPLAY_WIDTH = 160
 DISPLAY_HEIGHT = 128
 ROTATE = 0
-BGR = True
+BGR = False
 H_OFFSET = 0
 V_OFFSET = 0
 DISPLAY_STARTUP_DELAY = 5.0
@@ -33,6 +34,30 @@ RESET_RELEASE_TIME = 0.2
 DISPLAY_WARMUP_FRAME_SECONDS = 1.0
 
 logger = logging.getLogger(__name__)
+SOURCE_BACKGROUND = (13, 17, 23)
+
+
+def background_color():
+    """RGB color for the rendered background, configurable on the Pi."""
+    value = os.getenv("DISPLAY_BACKGROUND_RGB", "48,54,64")
+    try:
+        channels = tuple(int(part.strip()) for part in value.split(","))
+        if len(channels) == 3 and all(0 <= channel <= 255 for channel in channels):
+            return channels
+    except ValueError:
+        pass
+    raise ValueError("DISPLAY_BACKGROUND_RGB muss R,G,B mit Werten von 0 bis 255 sein")
+
+
+def brighten_background(image):
+    """Replace the dark backdrop while preserving the avatar's own colors."""
+    from PIL import Image, ImageChops
+
+    image = image.convert("RGB")
+    source = Image.new("RGB", image.size, SOURCE_BACKGROUND)
+    difference = ImageChops.difference(image, source).convert("L")
+    mask = difference.point(lambda value: 255 if value == 0 else 0)
+    return Image.composite(Image.new("RGB", image.size, background_color()), image, mask)
 
 
 def init_display():
@@ -57,7 +82,7 @@ def load_frames(display):
 
     def load(path):
         with Image.open(path) as image:
-            return image.convert("RGB").resize(size)
+            return brighten_background(image.resize(size))
 
     def sequence(directory):
         paths = sorted(directory.glob("frame_*.png"))

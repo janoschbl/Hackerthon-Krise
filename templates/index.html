@@ -36,6 +36,7 @@
     const volumeValue = document.querySelector('#volume-value');
     const avatar = document.querySelector('#avatar');
     let socket, stream, audioContext, processor, source, muteNode, active = false;
+    let reconnectTimer;
     let finalText = '';
 
     async function checkBackendHealth() {
@@ -214,16 +215,9 @@
       return output;
     }
 
-    async function start() {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        status.textContent = 'Mikrofonzugriff wird in diesem Browser-Kontext nicht unterstützt.';
-        return;
-      }
-      finalText = '';
-      transcript.textContent = '';
-      button.disabled = true;
+    function connectSocket() {
+      if (!active) return;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         socket = new WebSocket(`${protocol}//${location.host}/ws/deepgram`);
         socket.binaryType = 'arraybuffer';
@@ -244,45 +238,75 @@
               setAvatarScore(event.score);
             }
             status.textContent = 'Live';
+          } else if (event.event === 'choice_reset') {
+            score.textContent = '0';
+            chart.replaceChildren();
+            setAvatarScore(0);
+            status.textContent = 'Live – bereit für den nächsten Satz.';
           } else if (event.event === 'jev_error' || event.event === 'error') {
             status.textContent = `Fehler: ${event.message}`;
           }
         };
         socket.onclose = (event) => {
-          if (active) status.textContent = `Verbindung beendet (${event.reason || event.code})`;
-          stopAudio();
+          if (!active) return;
+          status.textContent = `Verbindung unterbrochen (${event.reason || event.code}); verbinde erneut …`;
+          reconnectTimer = setTimeout(connectSocket, 1000);
         };
         socket.onerror = () => { status.textContent = 'WebSocket-Verbindung fehlgeschlagen.'; };
         socket.onopen = () => {
-          audioContext = new AudioContext();
-          source = audioContext.createMediaStreamSource(stream);
-          processor = audioContext.createScriptProcessor(4096, 1, 1);
-          processor.onaudioprocess = (event) => {
-            const input = event.inputBuffer.getChannelData(0);
-            showVolume(input);
-            if (socket?.readyState !== WebSocket.OPEN) return;
-            const samples = downsample(input, audioContext.sampleRate, 16000);
-            socket.send(toPcm16(samples));
-          };
-          source.connect(processor);
-          muteNode = audioContext.createGain();
-          muteNode.gain.value = 0;
-          processor.connect(muteNode);
-          muteNode.connect(audioContext.destination);
-          active = true;
-          button.disabled = false;
-          button.textContent = 'Mikrofon stoppen';
+          if (!active) {
+            socket.close();
+            return;
+          }
+          if (!audioContext) {
+            audioContext = new AudioContext();
+            source = audioContext.createMediaStreamSource(stream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
+            processor.onaudioprocess = (event) => {
+              const input = event.inputBuffer.getChannelData(0);
+              showVolume(input);
+              if (socket?.readyState !== WebSocket.OPEN) return;
+              const samples = downsample(input, audioContext.sampleRate, 16000);
+              socket.send(toPcm16(samples));
+            };
+            source.connect(processor);
+            muteNode = audioContext.createGain();
+            muteNode.gain.value = 0;
+            processor.connect(muteNode);
+            muteNode.connect(audioContext.destination);
+          }
           status.textContent = 'Live – sprich jetzt.';
         };
       } catch (error) {
-        status.textContent = `Konnte Mikrofon/Verbindung nicht starten: ${error.message}`;
-        stopAudio();
+        status.textContent = `Verbindung fehlgeschlagen: ${error.message}; verbinde erneut …`;
+        reconnectTimer = setTimeout(connectSocket, 1000);
+      }
+    }
+
+    async function start() {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        status.textContent = 'Mikrofonzugriff wird in diesem Browser-Kontext nicht unterstützt.';
+        return;
+      }
+      finalText = '';
+      transcript.textContent = '';
+      button.disabled = true;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        active = true;
         button.disabled = false;
+        button.textContent = 'Mikrofon stoppen';
+        status.textContent = 'Verbinde …';
+        connectSocket();
+      } catch (error) {
+        status.textContent = `Konnte Mikrofon nicht starten: ${error.message}`;
+        stopAudio();
       }
     }
 
     function stopAudio() {
       active = false;
+      clearTimeout(reconnectTimer);
       processor?.disconnect();
       muteNode?.disconnect();
       source?.disconnect();
@@ -296,11 +320,13 @@
     }
 
     function stop() {
+      stopAudio();
       if (socket?.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ event: 'stop' }));
         socket.close();
+      } else if (socket) {
+        socket.close();
       }
-      stopAudio();
       finalText = '';
       transcript.textContent = '';
       status.textContent = 'Aufnahme beendet';

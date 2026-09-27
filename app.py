@@ -47,6 +47,7 @@ app = FastAPI(lifespan=lifespan)
 LAST_PREDICTION_SECONDS = 3.0
 MIN_VOLUME = 0.03
 last_prediction = None
+IDLE_PREDICTION = {"prediction": {"score": "0"}, "text": None, "volume": None}
 
 
 def choice_score(prediction) -> int:
@@ -87,6 +88,25 @@ def remember_prediction(prediction, text: str, volume: float | None):
         time.monotonic(),
         {"prediction": prediction, "text": text, "volume": volume},
     )
+
+
+def reset_prediction_to_idle(expected=None) -> bool:
+    """Reset the latest run without queuing a new audio track."""
+    global last_prediction
+    if last_prediction is None or (expected is not None and last_prediction is not expected):
+        return False
+    if last_prediction[1] == IDLE_PREDICTION:
+        return False
+    display_player.set_score(0)
+    last_prediction = (time.monotonic(), IDLE_PREDICTION.copy())
+    return True
+
+
+def note_transcript_activity():
+    """Keep the current run visible while new speech is arriving."""
+    global last_prediction
+    if last_prediction is not None and last_prediction[1] != IDLE_PREDICTION:
+        last_prediction = (time.monotonic(), last_prediction[1])
 
 
 def apply_prediction(prediction, text: str, volume: float | None) -> int:
@@ -169,16 +189,13 @@ def get_prediction(input_string: str):
 
 @app.get("/jev/get-last-prediction")
 def get_last_prediction():
-    global last_prediction
     latest = last_prediction
     if latest is None:
         return {"prediction": None, "text": None, "volume": None}
     timestamp, result = latest
-    if time.monotonic() - timestamp > LAST_PREDICTION_SECONDS:
-        if last_prediction is latest:
-            last_prediction = None
-        return {"prediction": None, "text": None, "volume": None}
-    return result
+    if result != IDLE_PREDICTION and time.monotonic() - timestamp > LAST_PREDICTION_SECONDS:
+        reset_prediction_to_idle(latest)
+    return last_prediction[1]
 
 
 @app.websocket("/ws/stt")
@@ -296,6 +313,27 @@ async def deepgram_websocket(websocket: WebSocket):
             paused = False
             stopped = False
             recent_volumes = deque(maxlen=256)
+            idle_task = None
+
+            def cancel_idle_reset():
+                nonlocal idle_task
+                if idle_task is not None:
+                    idle_task.cancel()
+                    idle_task = None
+
+            def schedule_idle_reset():
+                nonlocal idle_task
+                cancel_idle_reset()
+                expected = last_prediction
+                if expected is None or expected[1] == IDLE_PREDICTION:
+                    return
+
+                async def reset_after_silence():
+                    await asyncio.sleep(LAST_PREDICTION_SECONDS)
+                    if reset_prediction_to_idle(expected):
+                        await websocket.send_json({"event": "choice_reset", "score": 0})
+
+                idle_task = asyncio.create_task(reset_after_silence())
 
             async def client_to_deepgram():
                 nonlocal paused, stopped
@@ -363,6 +401,12 @@ async def deepgram_websocket(websocket: WebSocket):
                             if payload.get("deepgram_event") == "EndOfTurn"
                             else "transcript"
                         )
+                        if (payload.get("transcript") or "").strip():
+                            note_transcript_activity()
+                            if payload["event"] == "end_of_turn":
+                                cancel_idle_reset()
+                            else:
+                                schedule_idle_reset()
                     await websocket.send_json(payload)
                     if isinstance(payload, dict) and payload.get("event") == "end_of_turn":
                         transcript = (payload.get("transcript") or "").strip()
@@ -383,12 +427,14 @@ async def deepgram_websocket(websocket: WebSocket):
                                     "result": prediction,
                                     "score": score,
                                 })
+                                schedule_idle_reset()
                             except Exception as error:
                                 await websocket.send_json({
                                     "event": "jev_error",
                                     "transcript": transcript,
                                     "message": str(error),
                                 })
+                                schedule_idle_reset()
 
             tasks = {
                 asyncio.create_task(client_to_deepgram()),
@@ -398,6 +444,7 @@ async def deepgram_websocket(websocket: WebSocket):
             for task in pending:
                 task.cancel()
             await asyncio.gather(*pending, return_exceptions=True)
+            cancel_idle_reset()
             for task in done:
                 task.result()
     except WebSocketDisconnect:
